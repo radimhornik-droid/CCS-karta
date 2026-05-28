@@ -538,13 +538,20 @@ async function startup() {
 
   await initMsal(clientId);
 
-  // Handle redirect
-  try { await msalInstance.handleRedirectPromise(); } catch(e) {}
+  // Process a returned login/token redirect, if any (redirect flow lands here).
+  try {
+    const resp = await msalInstance.handleRedirectPromise();
+    if (resp && resp.account) currentAccount = resp.account;
+  } catch (e) {
+    showScreen('screen-login');
+    showError('login-error', 'Přihlášení selhalo: ' + (e.message || e));
+    return;
+  }
 
   const accounts = msalInstance.getAllAccounts();
   if (accounts.length === 0) { showScreen('screen-login'); return; }
 
-  currentAccount = accounts[0];
+  currentAccount = currentAccount || accounts[0];
 
   if (!STORAGE.spz() || !STORAGE.limit()) { showScreen('screen-setup'); return; }
 
@@ -572,11 +579,9 @@ async function doLogin() {
     await initMsal(cid);
   }
   try {
-    const result = await msalInstance.loginPopup({ scopes: ['Mail.Read', 'User.Read'] });
-    currentAccount = result.account;
-    if (!STORAGE.spz() || !STORAGE.limit()) { showScreen('screen-setup'); return; }
-    showScreen('screen-dash');
-    renderDash();
+    // Redirect flow: works in standalone/PWA windows where popups are blocked.
+    // The page navigates to Microsoft and returns via handleRedirectPromise().
+    await msalInstance.loginRedirect({ scopes: ['Mail.Read', 'User.Read'] });
   } catch(e) {
     showError('login-error', 'Přihlášení selhalo: ' + (e.message || e));
   }
@@ -584,7 +589,8 @@ async function doLogin() {
 
 function doLogout() {
   if (msalInstance && currentAccount) {
-    msalInstance.logoutPopup({ account: currentAccount }).catch(() => {});
+    msalInstance.logoutRedirect({ account: currentAccount });
+    return; // page navigates away
   }
   currentAccount = null;
   showScreen('screen-login');
@@ -609,8 +615,9 @@ async function getToken() {
     const res = await msalInstance.acquireTokenSilent(req);
     return res.accessToken;
   } catch {
-    const res = await msalInstance.acquireTokenPopup(req);
-    return res.accessToken;
+    // Silent failed (rare right after login): fall back to a full redirect.
+    await msalInstance.acquireTokenRedirect(req);
+    return null; // page navigates away; sync resumes on next click
   }
 }
 
