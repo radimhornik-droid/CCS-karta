@@ -1,0 +1,20 @@
+{
+  "name": "CCS Tracker",
+  "short_name": "CCS",
+  "description": "Přehled zbývajícího limitu CCS karty",
+  "lang": "cs",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f9fafb",
+  "theme_color": "#1a56db",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CCS Tracker">
+  <rect width="512" height="512" rx="116" fill="#1a56db"/>
+  <g fill="#ffffff">
+    <!-- pump base -->
+    <rect x="120" y="372" width="180" height="34" rx="12"/>
+    <!-- pump body -->
+    <rect x="140" y="116" width="150" height="268" rx="22"/>
+  </g>
+  <!-- display window -->
+  <rect x="162" y="146" width="106" height="78" rx="10" fill="#1a56db"/>
+  <rect x="176" y="164" width="78" height="13" rx="6" fill="#9dc1ff"/>
+  <rect x="176" y="190" width="50" height="13" rx="6" fill="#9dc1ff"/>
+  <!-- card slot -->
+  <rect x="162" y="250" width="106" height="16" rx="8" fill="#1a56db"/>
+  <!-- hose + nozzle -->
+  <path d="M290 168 h26 a34 34 0 0 1 34 34 v118 a26 26 0 0 1 -52 0 v-58 a14 14 0 0 0 -14 -14 h-8"
+        fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

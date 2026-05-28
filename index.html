@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>CCS Tracker</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -203,6 +206,13 @@
     .login-title { font-size: 26px; font-weight: 800; margin-bottom: 10px; }
     .login-sub { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; line-height: 1.5; }
 
+    /* ── LOCK SCREEN ── */
+    .lock-wrap { text-align: center; padding: 60px 20px 40px; }
+    .lock-icon { font-size: 64px; margin-bottom: 20px; }
+    .lock-title { font-size: 24px; font-weight: 800; margin-bottom: 10px; }
+    .lock-sub { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; line-height: 1.5; }
+    .link-btn { background: none; border: none; color: var(--text-muted); font-size: 14px; text-decoration: underline; cursor: pointer; margin-top: 14px; }
+
     /* ── SETUP SCREEN ── */
     .setup-icon { font-size: 40px; text-align: center; margin-bottom: 12px; }
     .setup-title { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 6px; }
@@ -305,6 +315,20 @@
       <button class="btn-secondary" onclick="showScreen('screen-azure')">⚙️ Nastavit Azure App ID</button>
     </div>
     <div id="login-error" class="alert alert-error" style="display:none;margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN: LOCK (biometric)
+═══════════════════════════════════════════ -->
+<div id="screen-lock" class="screen">
+  <div class="lock-wrap">
+    <div class="lock-icon">🔒</div>
+    <div class="lock-title">Odemkni aplikaci</div>
+    <div class="lock-sub">Pro přístup k přehledu použij otisk prstu.</div>
+    <button class="btn-primary" onclick="tryUnlock()">👆 Odemknout otiskem</button>
+    <div id="lock-error" class="alert alert-error" style="display:none;margin-top:16px"></div>
+    <button class="link-btn" onclick="doLogout()">Nejde to? Odhlásit se</button>
   </div>
 </div>
 
@@ -461,6 +485,15 @@
     <div id="edit-ok" class="alert alert-success" style="display:none;margin-top:10px">✅ Uloženo!</div>
   </div>
   <div class="card">
+    <div class="section-title">Zabezpečení</div>
+    <div class="settings-item">
+      <span class="settings-label">Odemykání otiskem prstu</span>
+      <span class="settings-value" id="s-bio">—</span>
+    </div>
+    <button class="btn-secondary" id="bio-btn" onclick="toggleBio()">Zapnout otisk prstu</button>
+    <div id="bio-msg" class="alert" style="display:none;margin-top:10px"></div>
+  </div>
+  <div class="card">
     <div class="section-title">Účet</div>
     <button class="btn-secondary" onclick="doLogout()">🚪 Odhlásit se</button>
     <button class="btn-danger" onclick="resetApp()" style="margin-top:8px">🗑️ Smazat vše a začít znovu</button>
@@ -498,7 +531,11 @@ const STORAGE = {
   setTx:    (y, m, arr) => localStorage.setItem(STORAGE.txKey(y,m), JSON.stringify(arr)),
   lastSync: () => localStorage.getItem('ccs_last_sync'),
   setSync:  (v) => localStorage.setItem('ccs_last_sync', v),
+  bioCredId: () => localStorage.getItem('ccs_bio_credid'),
 };
+
+// True once the biometric lock has been passed in this app session.
+let unlocked = false;
 
 // ── MSAL INIT ─────────────────────────────────────────────────────────────
 function initMsal(clientId) {
@@ -558,6 +595,15 @@ async function startup() {
 
   if (!STORAGE.spz() || !STORAGE.limit()) { showScreen('screen-setup'); return; }
 
+  gotoApp();
+}
+
+// Enter the app, gated by the biometric lock if it's enabled on this device.
+function gotoApp() {
+  if (STORAGE.bioCredId() && !unlocked) {
+    showScreen('screen-lock');
+    return;
+  }
   showScreen('screen-dash');
   renderDash();
 }
@@ -607,8 +653,101 @@ function saveSetup() {
   if (!limit || limit <= 0) { showError('setup-error', 'Zadej platný limit'); return; }
   localStorage.setItem('ccs_spz', spz);
   localStorage.setItem('ccs_limit', limit);
-  showScreen('screen-dash');
-  renderDash();
+  gotoApp();
+}
+
+// ── BIOMETRIC LOCK (WebAuthn) ─────────────────────────────────────────────
+// Client-side only (serverless PWA): registers a platform credential and
+// requires a successful fingerprint assertion to reveal the dashboard. This is
+// a convenience gate on top of the signed-in Microsoft session, not a server
+// auth. The credential is bound to this device + origin.
+function bioSupported() {
+  return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+}
+
+function bufToB64url(buf) {
+  let s = '';
+  const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlToBuf(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u.buffer;
+}
+function randomBytes(n) { return crypto.getRandomValues(new Uint8Array(n)); }
+
+async function enableBio() {
+  if (!bioSupported()) {
+    setBioMsg('Tvé zařízení nebo prohlížeč nepodporuje přihlášení otiskem.', 'error');
+    return;
+  }
+  try {
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge: randomBytes(32),
+        rp: { name: 'CCS Tracker' }, // rp.id defaults to current domain
+        user: {
+          id: randomBytes(16),
+          name: currentAccount?.username || 'ccs-tracker',
+          displayName: 'CCS Tracker',
+        },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+        timeout: 60000,
+        attestation: 'none',
+      },
+    });
+    localStorage.setItem('ccs_bio_credid', bufToB64url(cred.rawId));
+    unlocked = true;
+    renderSettings();
+    setBioMsg('✅ Odemykání otiskem je zapnuté.', 'success');
+  } catch (e) {
+    setBioMsg('Nepodařilo se zapnout otisk: ' + (e.message || e), 'error');
+  }
+}
+
+function disableBio() {
+  localStorage.removeItem('ccs_bio_credid');
+  renderSettings();
+  setBioMsg('Odemykání otiskem je vypnuté.', 'info');
+}
+
+function toggleBio() {
+  if (STORAGE.bioCredId()) disableBio();
+  else enableBio();
+}
+
+async function tryUnlock() {
+  const credId = STORAGE.bioCredId();
+  if (!credId) { unlocked = true; gotoApp(); return; }
+  try {
+    await navigator.credentials.get({
+      publicKey: {
+        challenge: randomBytes(32),
+        allowCredentials: [{ type: 'public-key', id: b64urlToBuf(credId), transports: ['internal'] }],
+        userVerification: 'required',
+        timeout: 60000,
+      },
+    });
+    unlocked = true;
+    showScreen('screen-dash');
+    renderDash();
+  } catch (e) {
+    showError('lock-error', 'Odemčení se nezdařilo. Zkus to znovu.');
+  }
+}
+
+function setBioMsg(msg, type = 'info') {
+  const el = document.getElementById('bio-msg');
+  el.className = 'alert alert-' + type;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 4000);
 }
 
 // ── GET ACCESS TOKEN ──────────────────────────────────────────────────────
@@ -894,6 +1033,21 @@ function renderSettings() {
   document.getElementById('s-user').textContent = currentAccount?.username || '—';
   document.getElementById('edit-spz').value = STORAGE.spz();
   document.getElementById('edit-limit').value = STORAGE.limit();
+
+  // Biometric lock state
+  const bioOn = !!STORAGE.bioCredId();
+  const btn = document.getElementById('bio-btn');
+  const val = document.getElementById('s-bio');
+  if (!bioSupported()) {
+    val.textContent = 'Nepodporováno';
+    btn.disabled = true;
+    btn.style.display = 'none';
+  } else {
+    val.textContent = bioOn ? 'Zapnuto' : 'Vypnuto';
+    btn.disabled = false;
+    btn.style.display = '';
+    btn.textContent = bioOn ? 'Vypnout otisk prstu' : 'Zapnout otisk prstu';
+  }
 }
 
 function saveEdit() {
