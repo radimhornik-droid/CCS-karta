@@ -802,8 +802,9 @@ function parseCCSEmail(rawBody, spz, receivedISO) {
   const wantSpz = (spz || '').toUpperCase();
 
   // Amount — prefer "snížil o částku X,X CZK", fall back to "Částka: X,X CZK"
-  const m1 = text.match(/sn[íi][žz]il\s+o\s+[čc][áa]stku\s+([\d\s]+[,.]\d+)\s*CZK/i);
-  const m2 = text.match(/[Čč][áa]stka:\s*([\d\s]+[,.]\d+)\s*CZK/i);
+  // Amount may be a whole number ("1 705 CZK") or have halíře ("997,1 CZK").
+  const m1 = text.match(/sn[íi][žz]il\s+o\s+[čc][áa]stku\s+([\d\s]+(?:[,.]\d+)?)\s*CZK/i);
+  const m2 = text.match(/[Čč][áa]stka:\s*([\d\s]+(?:[,.]\d+)?)\s*CZK/i);
   const am = m1 || m2;
   if (!am) return null;
   const amount = parseFloat(am[1].replace(/\s/g, '').replace(',', '.'));
@@ -1059,12 +1060,28 @@ function saveEdit() {
   const spz = document.getElementById('edit-spz').value.trim().toUpperCase();
   const limit = parseFloat(document.getElementById('edit-limit').value);
   if (spz.length < 4 || !limit || limit <= 0) return;
+  const spzChanged = spz !== STORAGE.spz();
   localStorage.setItem('ccs_spz', spz);
   localStorage.setItem('ccs_limit', limit);
+  // Stored transactions belong to the previous SPZ; clear them so a fresh Sync
+  // repopulates only the new plate's transactions (no mixing).
+  if (spzChanged) clearAllTx();
   renderSettings();
   const ok = document.getElementById('edit-ok');
+  ok.textContent = spzChanged ? '✅ Uloženo! Přepni na Přehled a klikni Sync.' : '✅ Uloženo!';
   ok.style.display = 'block';
-  setTimeout(() => ok.style.display = 'none', 2500);
+  setTimeout(() => ok.style.display = 'none', 4000);
+}
+
+// Remove all stored monthly transactions and the last-sync marker.
+function clearAllTx() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('ccs_tx_')) keys.push(k);
+  }
+  keys.forEach(k => localStorage.removeItem(k));
+  localStorage.removeItem('ccs_last_sync');
 }
 
 function resetApp() {
