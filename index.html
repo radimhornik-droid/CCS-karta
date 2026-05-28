@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="theme-color" content="#1a56db" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>CCS Tracker</title>
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue: #1a56db;
+      --blue-light: #e8f0fe;
+      --green: #057a55;
+      --green-light: #def7ec;
+      --orange: #e3a008;
+      --orange-light: #fdf6b2;
+      --red: #e02424;
+      --red-light: #fde8e8;
+      --gray: #6b7280;
+      --gray-light: #f3f4f6;
+      --border: #e5e7eb;
+      --text: #111827;
+      --text-muted: #6b7280;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f9fafb;
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      background: var(--blue);
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header-actions { display: flex; gap: 10px; }
+    .icon-btn {
+      background: rgba(255,255,255,.2);
+      border: none;
+      color: white;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 18px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .icon-btn:active { background: rgba(255,255,255,.35); }
+
+    /* ── SCREENS ── */
+    .screen { display: none; padding: 20px; max-width: 480px; margin: 0 auto; }
+    .screen.active { display: block; }
+
+    /* ── CARDS ── */
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+
+    /* ── BALANCE CARD ── */
+    .balance-card { text-align: center; padding: 28px 20px; }
+    .balance-label { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .balance-amount { font-size: 52px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+    .balance-amount.ok { color: var(--green); }
+    .balance-amount.warn { color: var(--orange); }
+    .balance-amount.danger { color: var(--red); }
+    .balance-sub { font-size: 14px; color: var(--text-muted); }
+
+    /* ── PROGRESS BAR ── */
+    .progress-wrap { margin: 20px 0 8px; }
+    .progress-labels { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .progress-bar-bg { background: var(--gray-light); border-radius: 99px; height: 12px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; border-radius: 99px; transition: width .4s ease; }
+    .progress-bar-fill.ok { background: var(--green); }
+    .progress-bar-fill.warn { background: var(--orange); }
+    .progress-bar-fill.danger { background: var(--red); }
+
+    /* ── STATS ROW ── */
+    .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .stat-card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .stat-value { font-size: 20px; font-weight: 700; }
+    .stat-value.spent { color: var(--red); }
+    .stat-value.count { color: var(--blue); }
+
+    /* ── TRANSACTIONS ── */
+    .section-title { font-size: 15px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: .4px; }
+    .tx-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .tx-item:last-child { border-bottom: none; }
+    .tx-left { flex: 1; }
+    .tx-where { font-size: 15px; font-weight: 500; }
+    .tx-date { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .tx-amount { font-size: 17px; font-weight: 700; color: var(--red); white-space: nowrap; }
+    .empty-state { text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 15px; }
+
+    /* ── SYNC STATUS ── */
+    .sync-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .sync-info { font-size: 13px; color: var(--text-muted); }
+    .btn-sync {
+      background: var(--blue);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-sync:disabled { background: var(--gray); cursor: not-allowed; }
+    .btn-sync:active:not(:disabled) { opacity: .85; }
+    .spinning { animation: spin 1s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── BUTTONS ── */
+    .btn-primary {
+      background: var(--blue);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 20px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .btn-primary:active { opacity: .85; }
+    .btn-secondary {
+      background: white;
+      color: var(--blue);
+      border: 2px solid var(--blue);
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .btn-danger {
+      background: white;
+      color: var(--red);
+      border: 2px solid var(--red);
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    /* ── FORMS ── */
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+    input[type=text], input[type=number] {
+      width: 100%;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 16px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: var(--blue); }
+    .hint { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── LOGIN SCREEN ── */
+    .login-wrap { text-align: center; padding: 40px 20px; }
+    .login-icon { font-size: 64px; margin-bottom: 20px; }
+    .login-title { font-size: 26px; font-weight: 800; margin-bottom: 10px; }
+    .login-sub { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; line-height: 1.5; }
+
+    /* ── SETUP SCREEN ── */
+    .setup-icon { font-size: 40px; text-align: center; margin-bottom: 12px; }
+    .setup-title { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 6px; }
+    .setup-sub { color: var(--text-muted); text-align: center; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+
+    /* ── AZURE GUIDE ── */
+    .guide-step {
+      background: var(--blue-light);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .guide-step strong { color: var(--blue); }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px; height: 22px;
+      background: var(--blue);
+      color: white;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      margin-right: 8px;
+    }
+    .code-inline {
+      background: #1e293b;
+      color: #7dd3fc;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    /* ── ALERT ── */
+    .alert {
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 14px;
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .alert-info { background: var(--blue-light); color: #1e40af; }
+    .alert-success { background: var(--green-light); color: #065f46; }
+    .alert-warn { background: var(--orange-light); color: #92400e; }
+    .alert-error { background: var(--red-light); color: #991b1b; }
+
+    /* ── MONTH SELECTOR ── */
+    .month-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .month-label { font-size: 17px; font-weight: 700; }
+    .month-btn { background: var(--gray-light); border: none; border-radius: 8px; padding: 8px 12px; font-size: 16px; cursor: pointer; }
+
+    /* ── SETTINGS SCREEN ── */
+    .settings-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .settings-item:last-child { border-bottom: none; }
+    .settings-label { font-size: 15px; }
+    .settings-value { font-size: 15px; color: var(--text-muted); }
+
+    /* ── BOTTOM NAV ── */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: white;
+      border-top: 1px solid var(--border);
+      display: flex;
+      z-index: 10;
+    }
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 4px 14px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-size: 11px;
+      color: var(--text-muted);
+      gap: 3px;
+    }
+    .nav-item.active { color: var(--blue); }
+    .nav-item span:first-child { font-size: 22px; }
+    body.has-nav { padding-bottom: 70px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN: LOGIN
+═══════════════════════════════════════════ -->
+<div id="screen-login" class="screen active">
+  <div class="login-wrap">
+    <div class="login-icon">⛽</div>
+    <div class="login-title">CCS Tracker</div>
+    <div class="login-sub">Přihlás se Microsoft účtem a zjistíš kolik ti zbývá na tankování tento měsíc.</div>
+    <button class="btn-primary" onclick="doLogin()">🔑 Přihlásit se přes Microsoft</button>
+    <div style="margin-top:20px">
+      <button class="btn-secondary" onclick="showScreen('screen-azure')">⚙️ Nastavit Azure App ID</button>
+    </div>
+    <div id="login-error" class="alert alert-error" style="display:none;margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN: AZURE SETUP
+═══════════════════════════════════════════ -->
+<div id="screen-azure" class="screen">
+  <div class="card">
+    <div class="setup-icon">🔧</div>
+    <div class="setup-title">Nastavení Azure</div>
+    <div class="setup-sub">Jednorázové nastavení (~5 min). Potřebuješ zaregistrovat aplikaci v Microsoft Azure.</div>
+
+    <div class="guide-step">
+      <span class="step-num">1</span>
+      Otevři <strong>portal.azure.com</strong> a přihlas se svým Microsoft účtem.
+    </div>
+    <div class="guide-step">
+      <span class="step-num">2</span>
+      Vyhledej <strong>„App registrations"</strong> a klikni na <strong>„New registration"</strong>.
+    </div>
+    <div class="guide-step">
+      <span class="step-num">3</span>
+      Zadej název (např. <code class="code-inline">CCS Tracker</code>), typ účtu: <strong>„Accounts in any organizational directory and personal Microsoft accounts"</strong>, Redirect URI: <strong>SPA</strong> →
+      <code class="code-inline">http://localhost</code> a pak taky přidej adresu kde máš tuto appku (nebo file://).
+    </div>
+    <div class="guide-step">
+      <span class="step-num">4</span>
+      Po vytvoření zkopíruj <strong>Application (client) ID</strong> — vypadá jako: <code class="code-inline">xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>
+    </div>
+    <div class="guide-step">
+      <span class="step-num">5</span>
+      V sekci <strong>API permissions</strong> přidej: <code class="code-inline">Microsoft Graph → Mail.Read</code> (delegated).
+    </div>
+
+    <div class="form-group" style="margin-top:20px">
+      <label>Application (Client) ID</label>
+      <input type="text" id="input-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+      <div class="hint">Zkopíruj z Azure portálu po registraci</div>
+    </div>
+    <button class="btn-primary" onclick="saveClientId()">✅ Uložit a pokračovat</button>
+    <button class="btn-secondary" onclick="showScreen('screen-login')" style="margin-top:8px">← Zpět</button>
+    <div id="azure-error" class="alert alert-error" style="display:none;margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN: INITIAL SETUP (SPZ + limit)
+═══════════════════════════════════════════ -->
+<div id="screen-setup" class="screen">
+  <div class="card">
+    <div class="setup-icon">🚗</div>
+    <div class="setup-title">Nastavení karty</div>
+    <div class="setup-sub">Zadej SPZ svého vozidla a měsíční limit tvé CCS karty.</div>
+
+    <div class="form-group">
+      <label>SPZ vozidla</label>
+      <input type="text" id="input-spz" placeholder="např. 1AB2345" style="text-transform:uppercase" />
+      <div class="hint">Přesně jak je uvedeno v CCS emailu (7 znaků)</div>
+    </div>
+    <div class="form-group">
+      <label>Měsíční limit (Kč)</label>
+      <input type="number" id="input-limit" placeholder="např. 5000" min="1" />
+      <div class="hint">Maximální čerpání za měsíc</div>
+    </div>
+    <button class="btn-primary" onclick="saveSetup()">✅ Uložit a začít</button>
+    <div id="setup-error" class="alert alert-error" style="display:none;margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN: DASHBOARD
+═══════════════════════════════════════════ -->
+<div id="screen-dash" class="screen">
+
+  <div class="sync-row">
+    <div class="sync-info" id="sync-info">Klikni na Sync pro načtení</div>
+    <button class="btn-sync" id="btn-sync" onclick="doSync()">
+      <span id="sync-icon">🔄</span> Sync
+    </button>
+  </div>
+
+  <div id="alert-area"></div>
+
+  <div class="card balance-card">
+    <div class="balance-label">Zbývá do konce měsíce</div>
+    <div class="balance-amount ok" id="balance-remaining">— Kč</div>
+    <div class="balance-sub" id="balance-sub">z <span id="balance-limit">—</span> Kč celkového limitu</div>
+    <div class="progress-wrap">
+      <div class="progress-labels">
+        <span>0 Kč</span>
+        <span id="progress-label-spent">—</span>
+        <span id="progress-label-limit">—</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill ok" id="progress-bar" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Utraceno tento měsíc</div>
+      <div class="stat-value spent" id="stat-spent">0 Kč</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Počet tankování</div>
+      <div class="stat-value count" id="stat-count">0</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="month-nav">
+      <button class="month-btn" onclick="changeMonth(-1)">‹</button>
+      <div class="month-label" id="month-label">Načítání…</div>
+      <button class="month-btn" onclick="changeMonth(1)">›</button>
+    </div>
+    <div class="section-title">Transakce</div>
+    <div id="tx-list"><div class="empty-state">Žádné transakce — klikni Sync</div></div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SCREEN: SETTINGS
+═══════════════════════════════════════════ -->
+<div id="screen-settings" class="screen">
+  <div class="card">
+    <div class="section-title">Moje nastavení</div>
+    <div class="settings-item">
+      <span class="settings-label">SPZ</span>
+      <span class="settings-value" id="s-spz">—</span>
+    </div>
+    <div class="settings-item">
+      <span class="settings-label">Měsíční limit</span>
+      <span class="settings-value" id="s-limit">—</span>
+    </div>
+    <div class="settings-item">
+      <span class="settings-label">Přihlášen jako</span>
+      <span class="settings-value" id="s-user">—</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="section-title">Upravit</div>
+    <div class="form-group">
+      <label>SPZ vozidla</label>
+      <input type="text" id="edit-spz" style="text-transform:uppercase" />
+    </div>
+    <div class="form-group">
+      <label>Měsíční limit (Kč)</label>
+      <input type="number" id="edit-limit" min="1" />
+    </div>
+    <button class="btn-primary" onclick="saveEdit()">💾 Uložit změny</button>
+    <div id="edit-ok" class="alert alert-success" style="display:none;margin-top:10px">✅ Uloženo!</div>
+  </div>
+  <div class="card">
+    <div class="section-title">Účet</div>
+    <button class="btn-secondary" onclick="doLogout()">🚪 Odhlásit se</button>
+    <button class="btn-danger" onclick="resetApp()" style="margin-top:8px">🗑️ Smazat vše a začít znovu</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     BOTTOM NAVIGATION
+═══════════════════════════════════════════ -->
+<nav class="bottom-nav" id="bottom-nav" style="display:none">
+  <button class="nav-item active" id="nav-dash" onclick="gotoNav('dash')">
+    <span>⛽</span><span>Přehled</span>
+  </button>
+  <button class="nav-item" id="nav-settings" onclick="gotoNav('settings')">
+    <span>⚙️</span><span>Nastavení</span>
+  </button>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════ -->
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+let msalInstance = null;
+let currentAccount = null;
+let viewMonth = new Date(); // which month we're displaying
+viewMonth.setDate(1);
+
+const STORAGE = {
+  clientId: () => localStorage.getItem('ccs_client_id'),
+  spz:      () => (localStorage.getItem('ccs_spz') || '').toUpperCase(),
+  limit:    () => parseFloat(localStorage.getItem('ccs_limit') || '0'),
+  txKey:    (y, m) => `ccs_tx_${y}_${String(m+1).padStart(2,'0')}`,
+  getTx:    (y, m) => JSON.parse(localStorage.getItem(STORAGE.txKey(y,m)) || '[]'),
+  setTx:    (y, m, arr) => localStorage.setItem(STORAGE.txKey(y,m), JSON.stringify(arr)),
+  lastSync: () => localStorage.getItem('ccs_last_sync'),
+  setSync:  (v) => localStorage.setItem('ccs_last_sync', v),
+};
+
+// ── MSAL INIT ─────────────────────────────────────────────────────────────
+function initMsal(clientId) {
+  const config = {
+    auth: {
+      clientId,
+      authority: 'https://login.microsoftonline.com/common',
+      redirectUri: window.location.href.split('?')[0].split('#')[0],
+    },
+    cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+  };
+  msalInstance = new msal.PublicClientApplication(config);
+  return msalInstance.initialize();
+}
+
+// ── SCREEN ROUTER ─────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const showNav = (id === 'screen-dash' || id === 'screen-settings');
+  document.getElementById('bottom-nav').style.display = showNav ? 'flex' : 'none';
+  document.body.classList.toggle('has-nav', showNav);
+}
+
+function gotoNav(tab) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('nav-' + tab).classList.add('active');
+  showScreen('screen-' + tab);
+  if (tab === 'settings') renderSettings();
+  if (tab === 'dash') renderDash();
+}
+
+// ── STARTUP ───────────────────────────────────────────────────────────────
+async function startup() {
+  const clientId = STORAGE.clientId();
+  if (!clientId) { showScreen('screen-azure'); return; }
+
+  await initMsal(clientId);
+
+  // Handle redirect
+  try { await msalInstance.handleRedirectPromise(); } catch(e) {}
+
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) { showScreen('screen-login'); return; }
+
+  currentAccount = accounts[0];
+
+  if (!STORAGE.spz() || !STORAGE.limit()) { showScreen('screen-setup'); return; }
+
+  showScreen('screen-dash');
+  renderDash();
+}
+
+// ── AZURE SETUP ───────────────────────────────────────────────────────────
+function saveClientId() {
+  const v = document.getElementById('input-client-id').value.trim();
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRe.test(v)) {
+    showError('azure-error', 'Neplatné Client ID — musí mít formát xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx');
+    return;
+  }
+  localStorage.setItem('ccs_client_id', v);
+  startup();
+}
+
+// ── LOGIN / LOGOUT ────────────────────────────────────────────────────────
+async function doLogin() {
+  if (!msalInstance) {
+    const cid = STORAGE.clientId();
+    if (!cid) { showScreen('screen-azure'); return; }
+    await initMsal(cid);
+  }
+  try {
+    const result = await msalInstance.loginPopup({ scopes: ['Mail.Read', 'User.Read'] });
+    currentAccount = result.account;
+    if (!STORAGE.spz() || !STORAGE.limit()) { showScreen('screen-setup'); return; }
+    showScreen('screen-dash');
+    renderDash();
+  } catch(e) {
+    showError('login-error', 'Přihlášení selhalo: ' + (e.message || e));
+  }
+}
+
+function doLogout() {
+  if (msalInstance && currentAccount) {
+    msalInstance.logoutPopup({ account: currentAccount }).catch(() => {});
+  }
+  currentAccount = null;
+  showScreen('screen-login');
+}
+
+// ── INITIAL SETUP ─────────────────────────────────────────────────────────
+function saveSetup() {
+  const spz = document.getElementById('input-spz').value.trim().toUpperCase();
+  const limit = parseFloat(document.getElementById('input-limit').value);
+  if (spz.length < 4) { showError('setup-error', 'Zadej platné SPZ'); return; }
+  if (!limit || limit <= 0) { showError('setup-error', 'Zadej platný limit'); return; }
+  localStorage.setItem('ccs_spz', spz);
+  localStorage.setItem('ccs_limit', limit);
+  showScreen('screen-dash');
+  renderDash();
+}
+
+// ── GET ACCESS TOKEN ──────────────────────────────────────────────────────
+async function getToken() {
+  const req = { scopes: ['Mail.Read'], account: currentAccount };
+  try {
+    const res = await msalInstance.acquireTokenSilent(req);
+    return res.accessToken;
+  } catch {
+    const res = await msalInstance.acquireTokenPopup(req);
+    return res.accessToken;
+  }
+}
+
+// ── EMAIL PARSING ─────────────────────────────────────────────────────────
+function parseCCSEmail(body, spz) {
+  // Check if email mentions our SPZ
+  if (!body.includes(spz)) return null;
+
+  // Extract amount — "snížil o částku X,X CZK" or "Částka: X,X CZK"
+  let amount = null;
+  const m1 = body.match(/sn[íi][žz]il\s+o\s+[čc][áa]stku\s+([\d\s]+[,.]\d+)\s*CZK/i);
+  const m2 = body.match(/[Čč][áa]stka:\s*([\d\s]+[,.]\d+)\s*CZK/i);
+  const match = m1 || m2;
+  if (match) {
+    amount = parseFloat(match[1].replace(/\s/g, '').replace(',', '.'));
+  }
+  if (!amount || isNaN(amount)) return null;
+
+  // Extract location — "v Xxx" or just use "Tankování"
+  let location = 'Tankování';
+  const locM = body.match(/\bv\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][^\n,]{2,30})/);
+  if (locM) location = locM[1].trim();
+
+  return { amount, location };
+}
+
+// ── SYNC ──────────────────────────────────────────────────────────────────
+async function doSync() {
+  const btn = document.getElementById('btn-sync');
+  const icon = document.getElementById('sync-icon');
+  btn.disabled = true;
+  icon.textContent = '⏳';
+  icon.classList.add('spinning');
+  setAlert('');
+
+  try {
+    const token = await getToken();
+    const spz = STORAGE.spz();
+
+    // Fetch last 3 months of CCS emails
+    const since = new Date();
+    since.setMonth(since.getMonth() - 3);
+    since.setDate(1);
+    const sinceISO = since.toISOString();
+
+    // Query: emails from CCS in last 3 months
+    const url = `https://graph.microsoft.com/v1.0/me/messages`
+      + `?$filter=receivedDateTime ge ${sinceISO} and from/emailAddress/address eq 'market@ccs.cz'`
+      + `&$select=receivedDateTime,body`
+      + `&$top=200`
+      + `&$orderby=receivedDateTime desc`;
+
+    const resp = await fetch(url, {
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error?.message || 'Graph API chyba ' + resp.status);
+    }
+
+    const data = await resp.json();
+    const emails = data.value || [];
+
+    // Group by month
+    const byMonth = {};
+    for (const email of emails) {
+      const d = new Date(email.receivedDateTime);
+      const key = `${d.getFullYear()}_${d.getMonth()}`;
+      if (!byMonth[key]) byMonth[key] = [];
+      byMonth[key].push({ date: d, body: email.body?.content || '' });
+    }
+
+    // Parse and store
+    let totalNew = 0;
+    for (const [key, msgs] of Object.entries(byMonth)) {
+      const [y, m] = key.split('_').map(Number);
+      const existing = STORAGE.getTx(y, m);
+      const existingCodes = new Set(existing.map(t => t.ts));
+      const newTx = [];
+
+      for (const msg of msgs) {
+        const parsed = parseCCSEmail(msg.body, spz);
+        if (!parsed) continue;
+        const ts = msg.date.getTime();
+        if (existingCodes.has(ts)) continue;
+        newTx.push({
+          ts,
+          date: msg.date.toISOString(),
+          amount: parsed.amount,
+          location: parsed.location,
+        });
+      }
+
+      if (newTx.length > 0) {
+        const merged = [...existing, ...newTx].sort((a,b) => b.ts - a.ts);
+        STORAGE.setTx(y, m, merged);
+        totalNew += newTx.length;
+      }
+    }
+
+    STORAGE.setSync(new Date().toLocaleString('cs-CZ'));
+    setAlert(
+      totalNew > 0
+        ? `✅ Synchronizováno — ${totalNew} nových transakcí`
+        : '✅ Synchronizováno — vše aktuální',
+      totalNew > 0 ? 'success' : 'info'
+    );
+    renderDash();
+  } catch(e) {
+    setAlert('❌ Chyba synchronizace: ' + (e.message || e), 'error');
+  } finally {
+    btn.disabled = false;
+    icon.textContent = '🔄';
+    icon.classList.remove('spinning');
+  }
+}
+
+// ── RENDER DASHBOARD ──────────────────────────────────────────────────────
+function renderDash() {
+  const limit = STORAGE.limit();
+  const spz   = STORAGE.spz();
+  const y = viewMonth.getFullYear();
+  const m = viewMonth.getMonth();
+  const txs = STORAGE.getTx(y, m);
+
+  // Month label
+  const monthName = viewMonth.toLocaleString('cs-CZ', { month: 'long', year: 'numeric' });
+  document.getElementById('month-label').textContent =
+    monthName.charAt(0).toUpperCase() + monthName.slice(1);
+
+  // Totals
+  const spent = txs.reduce((s, t) => s + t.amount, 0);
+  const remaining = limit - spent;
+  const pct = limit > 0 ? Math.min(100, (spent / limit) * 100) : 0;
+
+  // Color class
+  let cls = 'ok';
+  if (pct >= 90) cls = 'danger';
+  else if (pct >= 70) cls = 'warn';
+
+  // Balance
+  document.getElementById('balance-remaining').textContent = fmtKc(remaining);
+  document.getElementById('balance-remaining').className = 'balance-amount ' + cls;
+  document.getElementById('balance-limit').textContent = fmtKc(limit);
+  document.getElementById('balance-sub').innerHTML = `z <span id="balance-limit">${fmtKc(limit)}</span> Kč celkového limitu`;
+
+  // Progress
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-bar').className = 'progress-bar-fill ' + cls;
+  document.getElementById('progress-label-spent').textContent = fmtKc(spent) + ' Kč';
+  document.getElementById('progress-label-limit').textContent = fmtKc(limit) + ' Kč';
+
+  // Stats
+  document.getElementById('stat-spent').textContent = fmtKc(spent) + ' Kč';
+  document.getElementById('stat-count').textContent = txs.length;
+
+  // Sync info
+  const ls = STORAGE.lastSync();
+  document.getElementById('sync-info').textContent = ls ? 'Poslední sync: ' + ls : 'Klikni Sync';
+
+  // Transactions
+  const list = document.getElementById('tx-list');
+  if (txs.length === 0) {
+    list.innerHTML = `<div class="empty-state">Žádné transakce pro ${monthName}</div>`;
+  } else {
+    list.innerHTML = txs.map(t => `
+      <div class="tx-item">
+        <div class="tx-left">
+          <div class="tx-where">${escHtml(t.location)}</div>
+          <div class="tx-date">${new Date(t.date).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        <div class="tx-amount">−${fmtKc(t.amount)} Kč</div>
+      </div>
+    `).join('');
+  }
+}
+
+function changeMonth(dir) {
+  viewMonth.setMonth(viewMonth.getMonth() + dir);
+  renderDash();
+}
+
+// ── SETTINGS ──────────────────────────────────────────────────────────────
+function renderSettings() {
+  document.getElementById('s-spz').textContent = STORAGE.spz() || '—';
+  document.getElementById('s-limit').textContent = STORAGE.limit() ? fmtKc(STORAGE.limit()) + ' Kč' : '—';
+  document.getElementById('s-user').textContent = currentAccount?.username || '—';
+  document.getElementById('edit-spz').value = STORAGE.spz();
+  document.getElementById('edit-limit').value = STORAGE.limit();
+}
+
+function saveEdit() {
+  const spz = document.getElementById('edit-spz').value.trim().toUpperCase();
+  const limit = parseFloat(document.getElementById('edit-limit').value);
+  if (spz.length < 4 || !limit || limit <= 0) return;
+  localStorage.setItem('ccs_spz', spz);
+  localStorage.setItem('ccs_limit', limit);
+  renderSettings();
+  const ok = document.getElementById('edit-ok');
+  ok.style.display = 'block';
+  setTimeout(() => ok.style.display = 'none', 2500);
+}
+
+function resetApp() {
+  if (!confirm('Opravdu smazat všechna data a nastavení?')) return;
+  localStorage.clear();
+  location.reload();
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────
+function fmtKc(n) {
+  return Math.round(n).toLocaleString('cs-CZ');
+}
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 5000);
+}
+function setAlert(msg, type = 'info') {
+  const area = document.getElementById('alert-area');
+  if (!msg) { area.innerHTML = ''; return; }
+  area.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+  setTimeout(() => area.innerHTML = '', 6000);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────
+startup();
+</script>
+</body>
+</html>
