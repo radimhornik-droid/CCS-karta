@@ -83,6 +83,10 @@
     .balance-amount.warn { color: var(--orange); }
     .balance-amount.danger { color: var(--red); }
     .balance-sub { font-size: 14px; color: var(--text-muted); }
+    .last-fuel { margin-top: 14px; font-size: 14px; font-weight: 600; color: var(--text); }
+    .last-fuel .rel { font-weight: 400; color: var(--text-muted); }
+    .last-fuel.stale { color: var(--orange); }
+    .last-fuel.stale .rel { color: var(--orange); }
 
     /* ── PROGRESS BAR ── */
     .progress-wrap { margin: 20px 0 8px; }
@@ -115,6 +119,7 @@
     .tx-where { font-size: 15px; font-weight: 500; }
     .tx-date { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
     .tx-amount { font-size: 17px; font-weight: 700; color: var(--red); white-space: nowrap; }
+    .badge-pending { display: inline-block; font-size: 11px; font-weight: 600; color: var(--orange); background: var(--orange-light); border-radius: 6px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
     .empty-state { text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 15px; }
 
     /* ── SYNC STATUS ── */
@@ -387,6 +392,7 @@
     <div class="balance-label">Zbývá do konce měsíce</div>
     <div class="balance-amount ok" id="balance-remaining">— Kč</div>
     <div class="balance-sub" id="balance-sub">z <span id="balance-limit">—</span> Kč celkového limitu</div>
+    <div class="last-fuel" id="last-fuel"></div>
     <div class="progress-wrap">
       <div class="progress-labels">
         <span>0 Kč</span>
@@ -609,26 +615,115 @@ async function getToken() {
 }
 
 // ── EMAIL PARSING ─────────────────────────────────────────────────────────
-function parseCCSEmail(body, spz) {
-  // Check if email mentions our SPZ
-  if (!body.includes(spz)) return null;
+// CCS emails arrive as HTML. Strip tags to plain text before regex matching so
+// the parsing is robust against markup inserted between words.
+function htmlToText(html) {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|table)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]*\n+/g, '\n')
+    .trim();
+}
 
-  // Extract amount — "snížil o částku X,X CZK" or "Částka: X,X CZK"
-  let amount = null;
-  const m1 = body.match(/sn[íi][žz]il\s+o\s+[čc][áa]stku\s+([\d\s]+[,.]\d+)\s*CZK/i);
-  const m2 = body.match(/[Čč][áa]stka:\s*([\d\s]+[,.]\d+)\s*CZK/i);
-  const match = m1 || m2;
-  if (match) {
-    amount = parseFloat(match[1].replace(/\s/g, '').replace(',', '.'));
-  }
+// "Datum provedení: 26.05.2026" → Date (noon, to avoid timezone day-shift)
+function parseTxDate(text) {
+  const m = text.match(/Datum\s+proveden[íi]:\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/i);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12, 0, 0);
+}
+
+// Parse a single CCS transaction email. Returns null if it isn't a payment for
+// the requested SPZ (or isn't a transaction email at all).
+function parseCCSEmail(rawBody, spz, receivedISO) {
+  const text = htmlToText(rawBody);
+  const wantSpz = (spz || '').toUpperCase();
+
+  // Amount — prefer "snížil o částku X,X CZK", fall back to "Částka: X,X CZK"
+  const m1 = text.match(/sn[íi][žz]il\s+o\s+[čc][áa]stku\s+([\d\s]+[,.]\d+)\s*CZK/i);
+  const m2 = text.match(/[Čč][áa]stka:\s*([\d\s]+[,.]\d+)\s*CZK/i);
+  const am = m1 || m2;
+  if (!am) return null;
+  const amount = parseFloat(am[1].replace(/\s/g, '').replace(',', '.'));
   if (!amount || isNaN(amount)) return null;
 
-  // Extract location — "v Xxx" or just use "Tankování"
-  let location = 'Tankování';
-  const locM = body.match(/\bv\s+([A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][^\n,]{2,30})/);
-  if (locM) location = locM[1].trim();
+  // Payment line: "Platba kartou XXXXXXX XXXXX7232004 9AP7292 (nezaúčtováno) v Pha 5,Plzeňská"
+  // Capture: SPZ (5-8 alnum directly before the status parens), status, location.
+  let cardSpz = null, status = '', location = 'Tankování';
+  const pl = text.match(/Platba\s+kartou\s+.*?\b([A-Z0-9]{5,8})\s*\(([^)]*)\)\s*(?:v\s+([^\n]+))?/i);
+  if (pl) {
+    cardSpz = pl[1].toUpperCase();
+    status = (pl[2] || '').trim();
+    if (pl[3]) location = pl[3].trim().replace(/\s*,\s*/g, ', ');
+  }
 
-  return { amount, location };
+  // SPZ filter: exact match on the card's SPZ when we parsed it, otherwise a
+  // substring fallback so we still match if the payment line format changes.
+  if (cardSpz) {
+    if (cardSpz !== wantSpz) return null;
+  } else if (!text.toUpperCase().includes(wantSpz)) {
+    return null;
+  }
+
+  // Unique transaction id, used for dedup across syncs.
+  let code = null;
+  const cm = text.match(/K[óo]d\s+transakce:\s*(\d+)/i);
+  if (cm) code = cm[1];
+
+  // Real fueling date ("Datum provedení"); fall back to when the email arrived.
+  const date = parseTxDate(text) || (receivedISO ? new Date(receivedISO) : new Date());
+
+  return { amount, location, status, code, date, received: receivedISO || null };
+}
+
+// ── GRAPH FETCH ───────────────────────────────────────────────────────────
+// Filtering messages by a sender (a navigation property) together with an
+// $orderby on receivedDateTime can trip Graph's "InefficientFilter" error.
+// We enable advanced queries (ConsistencyLevel: eventual) and, if the ordered
+// query still fails, retry without $orderby and sort client-side. Both paths
+// page through @odata.nextLink.
+async function fetchCCSEmails(token, sinceISO) {
+  const base = 'https://graph.microsoft.com/v1.0/me/messages';
+  const filter = `receivedDateTime ge ${sinceISO} and from/emailAddress/address eq 'market@ccs.cz'`;
+  const select = 'receivedDateTime,body';
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    ConsistencyLevel: 'eventual',
+  };
+
+  async function pageThrough(firstUrl) {
+    const out = [];
+    let url = firstUrl;
+    let pages = 0;
+    while (url && pages < 20) {
+      const resp = await fetch(url, { headers });
+      if (!resp.ok) {
+        let msg = 'Graph API chyba ' + resp.status;
+        try { const e = await resp.json(); msg = e.error?.message || msg; } catch {}
+        const err = new Error(msg); err.status = resp.status; throw err;
+      }
+      const data = await resp.json();
+      out.push(...(data.value || []));
+      url = data['@odata.nextLink'] || null;
+      pages++;
+    }
+    return out;
+  }
+
+  const q = `${base}?$filter=${encodeURIComponent(filter)}&$select=${select}&$top=100&$count=true`;
+  try {
+    return await pageThrough(q + '&$orderby=receivedDateTime desc');
+  } catch (e) {
+    return await pageThrough(q); // fallback: no $orderby, sorted client-side
+  }
 }
 
 // ── SYNC ──────────────────────────────────────────────────────────────────
@@ -650,57 +745,48 @@ async function doSync() {
     since.setDate(1);
     const sinceISO = since.toISOString();
 
-    // Query: emails from CCS in last 3 months
-    const url = `https://graph.microsoft.com/v1.0/me/messages`
-      + `?$filter=receivedDateTime ge ${sinceISO} and from/emailAddress/address eq 'market@ccs.cz'`
-      + `&$select=receivedDateTime,body`
-      + `&$top=200`
-      + `&$orderby=receivedDateTime desc`;
+    // Fetch CCS emails (resilient against Graph filter quirks + paging)
+    const emails = await fetchCCSEmails(token, sinceISO);
 
-    const resp = await fetch(url, {
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.error?.message || 'Graph API chyba ' + resp.status);
-    }
-
-    const data = await resp.json();
-    const emails = data.value || [];
-
-    // Group by month
-    const byMonth = {};
+    // Parse every email first, then group by the real fueling date
+    // ("Datum provedení") instead of when the email happened to arrive.
+    const parsed = [];
     for (const email of emails) {
-      const d = new Date(email.receivedDateTime);
-      const key = `${d.getFullYear()}_${d.getMonth()}`;
-      if (!byMonth[key]) byMonth[key] = [];
-      byMonth[key].push({ date: d, body: email.body?.content || '' });
+      const p = parseCCSEmail(email.body?.content || '', spz, email.receivedDateTime);
+      if (p) parsed.push(p);
     }
 
-    // Parse and store
+    const byMonth = {};
+    for (const p of parsed) {
+      const key = `${p.date.getFullYear()}_${p.date.getMonth()}`;
+      (byMonth[key] || (byMonth[key] = [])).push(p);
+    }
+
+    // Merge into per-month storage, deduping by transaction code (fallback ts).
     let totalNew = 0;
-    for (const [key, msgs] of Object.entries(byMonth)) {
+    for (const [key, list] of Object.entries(byMonth)) {
       const [y, m] = key.split('_').map(Number);
       const existing = STORAGE.getTx(y, m);
-      const existingCodes = new Set(existing.map(t => t.ts));
+      const seen = new Set(existing.map(t => t.code ? 'c:' + t.code : 't:' + t.ts));
       const newTx = [];
 
-      for (const msg of msgs) {
-        const parsed = parseCCSEmail(msg.body, spz);
-        if (!parsed) continue;
-        const ts = msg.date.getTime();
-        if (existingCodes.has(ts)) continue;
+      for (const p of list) {
+        const id = p.code ? 'c:' + p.code : 't:' + p.date.getTime();
+        if (seen.has(id)) continue;
+        seen.add(id);
         newTx.push({
-          ts,
-          date: msg.date.toISOString(),
-          amount: parsed.amount,
-          location: parsed.location,
+          ts: p.date.getTime(),
+          date: p.date.toISOString(),
+          amount: p.amount,
+          location: p.location,
+          status: p.status || '',
+          code: p.code || null,
+          received: p.received,
         });
       }
 
       if (newTx.length > 0) {
-        const merged = [...existing, ...newTx].sort((a,b) => b.ts - a.ts);
+        const merged = [...existing, ...newTx].sort((a, b) => b.ts - a.ts);
         STORAGE.setTx(y, m, merged);
         totalNew += newTx.length;
       }
@@ -766,20 +852,37 @@ function renderDash() {
   const ls = STORAGE.lastSync();
   document.getElementById('sync-info').textContent = ls ? 'Poslední sync: ' + ls : 'Klikni Sync';
 
+  // Last fueling — newest transaction across all months, so the user can judge
+  // how current the data is (CCS emails can arrive with a delay).
+  const lf = document.getElementById('last-fuel');
+  const latest = getLatestTx();
+  if (latest) {
+    const d = new Date(latest.date);
+    const dateStr = d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric', year: 'numeric' });
+    lf.innerHTML = `⛽ Poslední čerpání: ${dateStr} <span class="rel">· ${relCz(latest.date)}</span>`;
+    lf.classList.toggle('stale', daysAgo(latest.date) >= 7);
+  } else {
+    lf.innerHTML = '';
+    lf.classList.remove('stale');
+  }
+
   // Transactions
   const list = document.getElementById('tx-list');
   if (txs.length === 0) {
     list.innerHTML = `<div class="empty-state">Žádné transakce pro ${monthName}</div>`;
   } else {
-    list.innerHTML = txs.map(t => `
+    list.innerHTML = txs.map(t => {
+      const dateStr = new Date(t.date).toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' });
+      const pending = (t.status || '').toLowerCase().includes('nezaúčt');
+      return `
       <div class="tx-item">
         <div class="tx-left">
-          <div class="tx-where">${escHtml(t.location)}</div>
-          <div class="tx-date">${new Date(t.date).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})}</div>
+          <div class="tx-where">${escHtml(t.location)}${pending ? '<span class="badge-pending">nezaúčtováno</span>' : ''}</div>
+          <div class="tx-date">${dateStr}</div>
         </div>
         <div class="tx-amount">−${fmtKc(t.amount)} Kč</div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
 }
 
@@ -833,6 +936,36 @@ function setAlert(msg, type = 'info') {
   if (!msg) { area.innerHTML = ''; return; }
   area.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
   setTimeout(() => area.innerHTML = '', 6000);
+}
+
+// Newest transaction across every stored month (by fueling date).
+function getLatestTx() {
+  let latest = null;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith('ccs_tx_')) continue;
+    let arr;
+    try { arr = JSON.parse(localStorage.getItem(k) || '[]'); } catch { continue; }
+    for (const t of arr) {
+      if (!latest || t.ts > latest.ts) latest = t;
+    }
+  }
+  return latest;
+}
+
+// Whole calendar days between `dateLike` and today.
+function daysAgo(dateLike) {
+  const a = new Date(dateLike); a.setHours(0, 0, 0, 0);
+  const b = new Date(); b.setHours(0, 0, 0, 0);
+  return Math.round((b - a) / 86400000);
+}
+
+// Czech relative day phrase ("dnes" / "včera" / "před N dny").
+function relCz(dateLike) {
+  const n = daysAgo(dateLike);
+  if (n <= 0) return 'dnes';
+  if (n === 1) return 'včera';
+  return `před ${n} dny`;
 }
 
 // ── BOOT ──────────────────────────────────────────────────────────────────
