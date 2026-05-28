@@ -5,7 +5,7 @@
 Uživatel používá předplacené CCS karty vázané na SPZ automobilu. Každá karta má měsíční limit čerpání. Uživatel potřebuje vědět, za kolik ještě může natankovat.
 
 - CCS karty jsou firemní — emaily o transakcích chodí pro **všechna firemní SPZ**, uživatel potřebuje filtrovat jen svou SPZ
-- Zůstatek v emailu (např. 130 345 Kč) je **celkový účet firmy**, ne limit na konkrétní SPZ
+- Zůstatek v emailu (např. 12 345 Kč) je **celkový účet firmy**, ne limit na konkrétní SPZ
 - Měsíční limit na SPZ je znám uživateli, není v emailu
 
 ---
@@ -16,8 +16,8 @@ Uživatel používá předplacené CCS karty vázané na SPZ automobilu. Každá
 E-maily chodí od `market@ccs.cz`. Formát těla emailu (HTML):
 
 ```
-Vážený zákazníku, zůstatek na účtu číslo 8000288962 se snížil o částku 997,1 CZK.
-Dostupný zůstatek k 26.05.2026 je 130 345,3 CZK.
+Vážený zákazníku, zůstatek na účtu číslo 8000XXXXXX se snížil o částku 997,1 CZK.
+Dostupný zůstatek k 26.05.2026 je 12 345,6 CZK.
 Pro úplnost uvádíme detaily této platby:
 Platba kartou XXXXXXX XXXXX7232004 9AP7292 (nezaúčtováno) v Pha 5,Plzeňská
 Částka: 997,1 CZK
