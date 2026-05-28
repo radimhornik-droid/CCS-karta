@@ -695,45 +695,31 @@ function parseCCSEmail(rawBody, spz, receivedISO) {
 }
 
 // ── GRAPH FETCH ───────────────────────────────────────────────────────────
-// Filtering messages by a sender (a navigation property) together with an
-// $orderby on receivedDateTime can trip Graph's "InefficientFilter" error.
-// We enable advanced queries (ConsistencyLevel: eventual) and, if the ordered
-// query still fails, retry without $orderby and sort client-side. Both paths
-// page through @odata.nextLink.
+// CCS notifications are forwarded into this mailbox, so they arrive FROM the
+// forwarding address (subject "FW: …"), not from market@ccs.cz. We therefore
+// don't filter by sender — we fetch recent messages and let parseCCSEmail()
+// recognise the CCS ones by content. Pages through @odata.nextLink.
 async function fetchCCSEmails(token, sinceISO) {
   const base = 'https://graph.microsoft.com/v1.0/me/messages';
-  const filter = `receivedDateTime ge ${sinceISO} and from/emailAddress/address eq 'market@ccs.cz'`;
-  const select = 'receivedDateTime,body';
-  const headers = {
-    Authorization: 'Bearer ' + token,
-    ConsistencyLevel: 'eventual',
-  };
+  const headers = { Authorization: 'Bearer ' + token };
 
-  async function pageThrough(firstUrl) {
-    const out = [];
-    let url = firstUrl;
-    let pages = 0;
-    while (url && pages < 20) {
-      const resp = await fetch(url, { headers });
-      if (!resp.ok) {
-        let msg = 'Graph API chyba ' + resp.status;
-        try { const e = await resp.json(); msg = e.error?.message || msg; } catch {}
-        const err = new Error(msg); err.status = resp.status; throw err;
-      }
-      const data = await resp.json();
-      out.push(...(data.value || []));
-      url = data['@odata.nextLink'] || null;
-      pages++;
+  const out = [];
+  let url = `${base}?$filter=${encodeURIComponent('receivedDateTime ge ' + sinceISO)}`
+    + `&$select=receivedDateTime,body&$top=100&$orderby=receivedDateTime desc`;
+  let pages = 0;
+  while (url && pages < 20) {
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+      let msg = 'Graph API chyba ' + resp.status;
+      try { const e = await resp.json(); msg = e.error?.message || msg; } catch {}
+      const err = new Error(msg); err.status = resp.status; throw err;
     }
-    return out;
+    const data = await resp.json();
+    out.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+    pages++;
   }
-
-  const q = `${base}?$filter=${encodeURIComponent(filter)}&$select=${select}&$top=100&$count=true`;
-  try {
-    return await pageThrough(q + '&$orderby=receivedDateTime desc');
-  } catch (e) {
-    return await pageThrough(q); // fallback: no $orderby, sorted client-side
-  }
+  return out;
 }
 
 // ── SYNC ──────────────────────────────────────────────────────────────────
