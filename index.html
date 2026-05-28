@@ -10,7 +10,8 @@
   <title>CCS Tracker</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/svg+xml" href="icon.svg" />
-  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://alcdn.msauth.net/browser/2.38.1/js/msal-browser.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -522,8 +523,12 @@ let currentAccount = null;
 let viewMonth = new Date(); // which month we're displaying
 viewMonth.setDate(1);
 
+// Azure app registration (public client ID — not a secret). Baked in so no
+// device ever has to type it; a value saved via the Azure-setup screen overrides.
+const DEFAULT_CLIENT_ID = '211391b9-cab1-4433-adab-5f809947422a';
+
 const STORAGE = {
-  clientId: () => localStorage.getItem('ccs_client_id'),
+  clientId: () => localStorage.getItem('ccs_client_id') || DEFAULT_CLIENT_ID,
   spz:      () => (localStorage.getItem('ccs_spz') || '').toUpperCase(),
   limit:    () => parseFloat(localStorage.getItem('ccs_limit') || '0'),
   txKey:    (y, m) => `ccs_tx_${y}_${String(m+1).padStart(2,'0')}`,
