@@ -505,9 +505,10 @@ function initMsal(clientId) {
   const config = {
     auth: {
       clientId,
-      // Single-tenant app registration → must target the tenant endpoint, not
-      // /common (which AAD rejects with AADSTS50194). Tenant: Natland Management.
-      authority: 'https://login.microsoftonline.com/a98d0087-0cf5-49bc-8df0-e5b388f37429',
+      // Personal Microsoft account (e.g. @outlook.cz) → consumers endpoint.
+      // The app registration must allow personal accounts (signInAudience must
+      // include PersonalMicrosoftAccount), otherwise this endpoint is rejected.
+      authority: 'https://login.microsoftonline.com/consumers',
       redirectUri: window.location.href.split('?')[0].split('#')[0],
     },
     cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
